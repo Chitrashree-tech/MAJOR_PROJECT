@@ -1,74 +1,72 @@
-from .task_engine import select_tasks_for_capacity
+
+from datetime import datetime, timedelta
+
+from models.optimization_engine import select_tasks_for_capacity
+
+
+def format_time(value):
+    """Format a datetime as a readable time."""
+    return value.strftime("%I:%M %p").lstrip("0")
 
 
 def generate_daily_plan(
     tasks,
-    effective_hours
+    effective_hours,
+    completed_task_ids=None,
+    meeting_hours=0.0,
+    start_time="09:00",
 ):
-    result = select_tasks_for_capacity(
-        tasks,
-        effective_hours
+    """
+    Generate a daily schedule using the optimization engine.
+
+    effective_hours: work capacity before meetings.
+    meeting_hours: hours reserved for meetings.
+    """
+    effective_hours = max(0.0, float(effective_hours))
+    meeting_hours = max(0.0, float(meeting_hours))
+
+    available_hours = max(
+        0.0,
+        effective_hours - meeting_hours,
     )
 
-    selected_tasks = result["tasks"]
+    result = select_tasks_for_capacity(
+        tasks=tasks,
+        available_hours=available_hours,
+        completed_task_ids=completed_task_ids,
+    )
 
-    current_hour = 9.0
-
+    current_time = datetime.strptime(start_time, "%H:%M")
     schedule = []
 
-    for task in selected_tasks:
+    for task in result["tasks"]:
+        duration = float(task["estimated_hours"])
+        end_time = current_time + timedelta(hours=duration)
 
-        hours = float(
-            task.get("estimated_hours", 1)
-        )
+        schedule.append({
+            "task_id": task.get("id", task.get("task_id")),
+            "task_name": task.get(
+                "name",
+                task.get("title", "Untitled task"),
+            ),
+            "priority": task.get("priority", "Medium"),
+            "estimated_hours": round(duration, 2),
+            "delay_probability": float(
+                task.get("delay_probability", 0.0)
+            ),
+            "score": task.get("score", 0),
+            "start": format_time(current_time),
+            "end": format_time(end_time),
+        })
 
-        start_hour = current_hour
-        end_hour = current_hour + hours
-
-        schedule.append(
-            {
-                "task_id": task.get("id"),
-                "task_name": task.get("name"),
-                "priority": task.get("priority"),
-                "estimated_hours": hours,
-                "start": format_time(start_hour),
-                "end": format_time(end_hour),
-                "score": task.get("score", 0)
-            }
-        )
-
-        current_hour = end_hour
+        current_time = end_time
 
     return {
-        "effective_hours": effective_hours,
-        "planned_hours": result["total_hours"],
+        "effective_hours": round(effective_hours, 2),
+        "meeting_hours": round(meeting_hours, 2),
+        "available_hours": round(available_hours, 2),
+        "planned_hours": result["planned_hours"],
         "remaining_hours": result["remaining_hours"],
-        "tasks": schedule
+        "tasks": schedule,
+        "deferred_tasks": result["deferred_tasks"],
     }
-
-
-def format_time(decimal_hour):
-
-    hour = int(decimal_hour)
-    minutes = int(
-        (decimal_hour - hour) * 60
-    )
-
-    period = "AM"
-
-    if hour >= 12:
-        period = "PM"
-
-    display_hour = hour
-
-    if display_hour > 12:
-        display_hour -= 12
-
-    if display_hour == 0:
-        display_hour = 12
-
-    return (
-        f"{display_hour}:"
-        f"{minutes:02d} "
-        f"{period}"
-    )
